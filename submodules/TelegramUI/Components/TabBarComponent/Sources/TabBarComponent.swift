@@ -12,6 +12,8 @@ import BundleIconComponent
 import TextBadgeComponent
 import LiquidLens
 import AppBundle
+import LiquidGlassComponents
+import SwiftSignalKit
 
 private final class TabSelectionRecognizer: UIGestureRecognizer {
     private var initialLocation: CGPoint?
@@ -165,10 +167,13 @@ public final class TabBarComponent: Component {
         return true
     }
     
-    public final class View: UIView, UITabBarDelegate, UIGestureRecognizerDelegate {
-        private let liquidLensView: LiquidLensView
+    public final class View: UIView, UITabBarDelegate, UIGestureRecognizerDelegate, GlassLensViewParent {
+        private var liquidLensView: LiquidLensView?
         private let contextGestureContainerView: ContextControllerSourceView
-        
+
+        private var glassLensView: GlassLensView?
+        private lazy var glassLensViewContentView = UIView()
+
         private var itemViews: [AnyHashable: ComponentView<Empty>] = [:]
         private var selectedItemViews: [AnyHashable: ComponentView<Empty>] = [:]
         
@@ -180,10 +185,16 @@ public final class TabBarComponent: Component {
 
         private var selectionGestureState: (startX: CGFloat, currentX: CGFloat)?
         private var overrideSelectedItemId: AnyHashable?
-        
+
         public override init(frame: CGRect) {
-            self.liquidLensView = LiquidLensView()
-            
+            if #available(iOS 26, *) {
+                self.liquidLensView = LiquidLensView()
+                self.glassLensView = nil
+            } else {
+                self.liquidLensView = nil
+                self.glassLensView = GlassLensView(frame: frame)
+            }
+
             self.contextGestureContainerView = ContextControllerSourceView()
             self.contextGestureContainerView.isGestureEnabled = true
             
@@ -195,8 +206,12 @@ public final class TabBarComponent: Component {
             }
             
             self.addSubview(self.contextGestureContainerView)
-            
-            self.contextGestureContainerView.addSubview(self.liquidLensView)
+
+            if let liquidLensView = self.liquidLensView {
+                self.contextGestureContainerView.addSubview(liquidLensView)
+            } else if let _ = self.glassLensView {
+                self.contextGestureContainerView.addSubview(glassLensViewContentView)
+            }
             let tabSelectionRecognizer = TabSelectionRecognizer(target: self, action: #selector(self.onTabSelectionGesture(_:)))
             self.tabSelectionRecognizer = tabSelectionRecognizer
             self.addGestureRecognizer(tabSelectionRecognizer)
@@ -281,31 +296,35 @@ public final class TabBarComponent: Component {
         }
 
         @objc private func onTabSelectionGesture(_ recognizer: TabSelectionRecognizer) {
-            switch recognizer.state {
-            case .began:
-                if let itemId = self.item(at: recognizer.location(in: self)), let itemView = self.itemViews[itemId]?.view {
-                    let startX = itemView.frame.minX - 4.0
-                    self.selectionGestureState = (startX, startX)
-                    self.state?.updated(transition: .spring(duration: 0.4), isLocal: true)
-                }
-            case .changed:
-                if var selectionGestureState = self.selectionGestureState {
-                    selectionGestureState.currentX = selectionGestureState.startX + recognizer.translation(in: self).x
-                    self.selectionGestureState = selectionGestureState
-                    self.state?.updated(transition: .immediate, isLocal: true)
-                }
-            case .ended, .cancelled:
-                self.selectionGestureState = nil
-                if let component = self.component, let itemId = self.item(at: recognizer.location(in: self)) {
-                    guard let item = component.items.first(where: { $0.id == itemId }) else {
-                        return
+            if let glassLensView = self.glassLensView {
+                glassLensView.handleGesture(recognizer)
+            } else {
+                switch recognizer.state {
+                case .began:
+                    if let itemId = self.item(at: recognizer.location(in: self)), let itemView = self.itemViews[itemId]?.view {
+                        let startX = itemView.frame.minX - 4.0
+                        self.selectionGestureState = (startX, startX)
+                        self.state?.updated(transition: .spring(duration: 0.4), isLocal: true)
                     }
-                    self.overrideSelectedItemId = itemId
-                    item.action(false)
+                case .changed:
+                    if var selectionGestureState = self.selectionGestureState {
+                        selectionGestureState.currentX = selectionGestureState.startX + recognizer.translation(in: self).x
+                        self.selectionGestureState = selectionGestureState
+                        self.state?.updated(transition: .immediate, isLocal: true)
+                    }
+                case .ended, .cancelled:
+                    self.selectionGestureState = nil
+                    if let component = self.component, let itemId = self.item(at: recognizer.location(in: self)) {
+                        guard let item = component.items.first(where: { $0.id == itemId }) else {
+                            return
+                        }
+                        self.overrideSelectedItemId = itemId
+                        item.action(false)
+                    }
+                    self.state?.updated(transition: .spring(duration: 0.4), isLocal: true)
+                default:
+                    break
                 }
-                self.state?.updated(transition: .spring(duration: 0.4), isLocal: true)
-            default:
-                break
             }
         }
         
@@ -374,6 +393,7 @@ public final class TabBarComponent: Component {
 
             var validIds: [AnyHashable] = []
             var selectionFrame: CGRect?
+            var selectionIndex: Int?
             for index in 0 ..< component.items.count {
                 let item = component.items[index]
                 validIds.append(item.id)
@@ -396,20 +416,23 @@ public final class TabBarComponent: Component {
                     selectedItemView = ComponentView()
                     self.selectedItemViews[item.id] = selectedItemView
                 }
-                
+
                 let isItemSelected: Bool
                 if let overrideSelectedItemId = self.overrideSelectedItemId {
                     isItemSelected = overrideSelectedItemId == item.id
                 } else {
                     isItemSelected = component.selectedId == item.id
                 }
-                
+
                 let _ = itemView.update(
                     transition: itemTransition,
                     component: AnyComponent(ItemComponent(
                         item: item,
                         theme: component.theme,
-                        isSelected: false
+                        isSelected: false,
+                        badgeUpdatedCallback: { [weak self] in
+                            self?.needSnapshotsUpdate()
+                        }
                     )),
                     environment: {},
                     containerSize: itemSize
@@ -419,7 +442,10 @@ public final class TabBarComponent: Component {
                     component: AnyComponent(ItemComponent(
                         item: item,
                         theme: component.theme,
-                        isSelected: true
+                        isSelected: true,
+                        badgeUpdatedCallback: { [weak self] in
+                            self?.needSnapshotsUpdate()
+                        }
                     )),
                     environment: {},
                     containerSize: itemSize
@@ -431,13 +457,20 @@ public final class TabBarComponent: Component {
                         itemComponentView.isUserInteractionEnabled = false
                         selectedItemComponentView.isUserInteractionEnabled = false
 
-                        self.liquidLensView.contentView.addSubview(itemComponentView)
-                        self.liquidLensView.selectedContentView.addSubview(selectedItemComponentView)
+                        if let liquidLensView = self.liquidLensView {
+                            liquidLensView.contentView.addSubview(itemComponentView)
+                            liquidLensView.selectedContentView.addSubview(selectedItemComponentView)
+                        } else if self.glassLensView != nil {
+                            self.glassLensViewContentView.addSubview(itemComponentView)
+                            self.glassLensViewContentView.addSubview(selectedItemComponentView)
+                            itemComponentView.isHidden = isItemSelected
+                            selectedItemComponentView.isHidden = !isItemSelected
+                        }
                     }
                     itemTransition.setFrame(view: itemComponentView, frame: itemFrame)
                     itemTransition.setPosition(view: selectedItemComponentView, position: itemFrame.center)
                     itemTransition.setBounds(view: selectedItemComponentView, bounds: CGRect(origin: CGPoint(), size: itemFrame.size))
-                    itemTransition.setScale(view: selectedItemComponentView, scale: self.selectionGestureState != nil ? 1.15 : 1.0)
+                    itemTransition.setScale(view: selectedItemComponentView, scale: self.selectionGestureState != nil && glassLensView == nil ? 1.15 : 1.0)
                     
                     if let previousComponent, previousComponent.selectedId != item.id, isItemSelected {
                         itemComponentView.playSelectionAnimation()
@@ -446,6 +479,7 @@ public final class TabBarComponent: Component {
                 }
                 if isItemSelected {
                     selectionFrame = itemFrame
+                    selectionIndex = index
                 }
             }
             
@@ -464,20 +498,125 @@ public final class TabBarComponent: Component {
 
             transition.setFrame(view: self.contextGestureContainerView, frame: CGRect(origin: CGPoint(), size: size))
 
-            transition.setFrame(view: self.liquidLensView, frame: CGRect(origin: CGPoint(), size: size))
-            
-            let lensSelection: (x: CGFloat, width: CGFloat)
-            if let selectionGestureState = self.selectionGestureState {
-                lensSelection = (selectionGestureState.currentX, itemSize.width + innerInset * 2.0)
-            } else if let selectionFrame {
-                lensSelection = (selectionFrame.minX - innerInset, itemSize.width + innerInset * 2.0)
-            } else {
-                lensSelection = (0.0, itemSize.width)
+            if let liquidLensView = self.liquidLensView {
+                transition.setFrame(view: liquidLensView, frame: CGRect(origin: CGPoint(), size: size))
+
+                let lensSelection: (x: CGFloat, width: CGFloat)
+                if let selectionGestureState = self.selectionGestureState {
+                    lensSelection = (selectionGestureState.currentX, itemSize.width + innerInset * 2.0)
+                } else if let selectionFrame {
+                    lensSelection = (selectionFrame.minX - innerInset, itemSize.width + innerInset * 2.0)
+                } else {
+                    lensSelection = (0.0, itemSize.width)
+                }
+
+                liquidLensView.update(size: size, selectionX: lensSelection.x, selectionWidth: lensSelection.width, isDark: component.theme.overallDarkAppearance, isLifted: self.selectionGestureState != nil, transition: transition)
+            } else if let glassLensView = self.glassLensView {
+                self.addSubview(glassLensView)
+                glassLensView.numberOfItems = self.itemViews.count
+                if let selectionIndex, selectionIndex != glassLensView.currentlySelected {
+                    glassLensView.selectItem(at: selectionIndex, animated: false)
+                }
+                glassLensView.onItemSelected = { _, center in
+                    if let component = self.component, let itemId = self.item(at: self.convert(center, from: glassLensView)) {
+                        guard let item = component.items.first(where: { $0.id == itemId }) else {
+                            return
+                        }
+                        self.overrideSelectedItemId = itemId
+                        item.action(false)
+                        self.state?.updated(transition: .immediate, isLocal: true)
+                    }
+                }
+                glassLensView.configure(parent: self)
+                transition.setFrame(view: glassLensView, frame: CGRect(origin: CGPoint(), size: size).insetBy(dx: -glassLensView.configuration.samplingPadding, dy: -glassLensView.configuration.samplingPadding))
+                transition.setFrame(view: glassLensViewContentView, frame: CGRect(origin: CGPoint(), size: size))
+                glassLensViewContentView.layer.cornerRadius = size.height / 2
+                glassLensViewContentView.backgroundColor = component.theme.rootController.tabBar.backgroundColor.withAlphaComponent(1)
+                self.needSnapshotsUpdate()
             }
 
-            self.liquidLensView.update(size: size, selectionX: lensSelection.x, selectionWidth: lensSelection.width, isDark: component.theme.overallDarkAppearance, isLifted: self.selectionGestureState != nil, transition: transition)
-
             return size
+        }
+
+        public func provideSnapshots(samplingOffset: CGFloat, backgroundScale: CGFloat, foregroundScale: CGFloat) -> (background: UIImage, foreground: UIImage) {
+            let paddedBounds = bounds.insetBy(dx: -samplingOffset, dy: -samplingOffset)
+
+            let format = UIGraphicsImageRendererFormat()
+            format.opaque = false
+            format.scale = UIScreen.main.scale
+
+            let renderer = UIGraphicsImageRenderer(bounds: paddedBounds, format: format)
+            let backgroundImage: UIImage = {
+                let image = renderer.image { context in
+                    let ctx = context.cgContext
+                    ctx.saveGState()
+                    var states: [UIView: Bool] = [:]
+                    self.glassLensViewContentView.subviews.forEach { view in
+                        states[view] = view.isHidden
+                        view.isHidden = true
+                    }
+
+                    self.glassLensViewContentView.layer.render(in: ctx)
+
+                    self.glassLensViewContentView.subviews.forEach { view in
+                        view.isHidden = states[view] ?? false
+                    }
+                    ctx.restoreGState()
+                }
+
+                return image
+            }()
+            let foregroundImage: UIImage = {
+                let image = renderer.image { context in
+                    let ctx = context.cgContext
+                    ctx.saveGState()
+                    var states: [UIView: Bool] = [:]
+                    var transformStates: [UIView: CGAffineTransform] = [:]
+                    self.glassLensViewContentView.subviews.forEach { view in
+                        states[view] = view.isHidden
+                        view.isHidden = true
+                    }
+                    self.selectedItemViews.values.forEach {
+                        guard let view = $0.view else { return }
+                        view.isHidden = false
+                        transformStates[view] = view.transform
+                        $0.view?.transform = .init(scaleX: 1.15, y: 1.15)
+                    }
+                    let color = self.glassLensViewContentView.backgroundColor
+                    self.glassLensViewContentView.backgroundColor = .clear
+
+                    self.glassLensViewContentView.layer.render(in: ctx)
+
+                    self.glassLensViewContentView.backgroundColor = color
+                    self.glassLensViewContentView.subviews.forEach { view in
+                        view.isHidden = states[view] ?? false
+                    }
+                    self.selectedItemViews.values.forEach {
+                        guard let view = $0.view else { return }
+                        view.transform = transformStates[view] ?? .identity
+                    }
+                    ctx.restoreGState()
+                }
+
+                return image
+            }()
+
+            return (background: backgroundImage, foreground: foregroundImage)
+        }
+
+        public func contentViewForMasking() -> UIView {
+            self.glassLensViewContentView
+        }
+
+        public func placeLensShadow(view: UIView) {
+            self.glassLensViewContentView.insertSubview(view, at: 0)
+            view.backgroundColor = UIColor(white: 0.2, alpha: 1)
+        }
+
+        public func needSnapshotsUpdate() {
+            Queue.mainQueue().after(0) { [glassLensView] in
+                glassLensView?.captureParentSnapshot()
+            }
         }
     }
     
@@ -494,11 +633,13 @@ private final class ItemComponent: Component {
     let item: TabBarComponent.Item
     let theme: PresentationTheme
     let isSelected: Bool
-    
-    init(item: TabBarComponent.Item, theme: PresentationTheme, isSelected: Bool) {
+    let badgeUpdatedCallback: () -> Void
+
+    init(item: TabBarComponent.Item, theme: PresentationTheme, isSelected: Bool, badgeUpdatedCallback: @escaping () -> Void) {
         self.item = item
         self.theme = theme
         self.isSelected = isSelected
+        self.badgeUpdatedCallback = badgeUpdatedCallback
     }
     
     static func ==(lhs: ItemComponent, rhs: ItemComponent) -> Bool {
@@ -591,6 +732,7 @@ private final class ItemComponent: Component {
                         return
                     }
                     self.state?.updated(transition: .immediate, isLocal: true)
+                    self.component?.badgeUpdatedCallback()
                 }
             }
             

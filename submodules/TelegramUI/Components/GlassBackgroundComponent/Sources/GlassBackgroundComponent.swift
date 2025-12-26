@@ -6,6 +6,12 @@ import ComponentDisplayAdapters
 import UIKitRuntimeUtils
 import CoreImage
 import AppBundle
+import LiquidGlassComponents
+
+public enum GlassBackgroundLegacyMode {
+    case frostedGlass
+    case morphingGlass(String)
+}
 
 private final class ContentContainer: UIView {
     private let maskContentView: UIView
@@ -51,6 +57,38 @@ private final class ContentContainer: UIView {
 }
 
 public class GlassBackgroundView: UIView {
+    public enum LegacyMode {
+        public struct MorphingGlass {
+            public let groupKey: String
+            public let interactionScale: CGFloat
+            public let maxStretchScale: CGSize
+            public let maxTranslation: CGSize
+
+            public init(
+                groupKey: String,
+                interactionScale: CGFloat = 0.06,
+                maxStretchScale: CGSize = CGSize(width: 0.1, height: 0.1),
+                maxTranslation: CGSize = CGSize(width: 10, height: 10)
+            ) {
+                self.groupKey = groupKey
+                self.interactionScale = interactionScale
+                self.maxStretchScale = maxStretchScale
+                self.maxTranslation = maxTranslation
+            }
+
+            public static func smallUtilityButton(group: String) -> MorphingGlass {
+                MorphingGlass(
+                    groupKey: group,
+                    interactionScale: 0.15,
+                    maxStretchScale: .init(width: 0.1, height: 0.1),
+                    maxTranslation: .init(width: 5, height: 5)
+                )
+            }
+        }
+        case frostedGlass
+        case morphingGlass(MorphingGlass)
+    }
+
     public protocol ContentView: UIView {
         var tintMask: UIView { get }
     }
@@ -313,12 +351,16 @@ public class GlassBackgroundView: UIView {
     private let maskContainerView: UIView
     public let maskContentView: UIView
     private let contentContainer: ContentContainer
-    
+
+    private let morphingShapeView: MorphingShapeView?
+
     private var innerBackgroundView: UIView?
     
     public var contentView: UIView {
         if let nativeView = self.nativeView {
             return nativeView.contentView
+        } else if let morphingShapeView {
+            return morphingShapeView
         } else {
             return self.contentContainer
         }
@@ -328,7 +370,7 @@ public class GlassBackgroundView: UIView {
         
     public static var useCustomGlassImpl: Bool = false
     
-    public override init(frame: CGRect) {
+    public init(mode: LegacyMode = .frostedGlass) {
         if #available(iOS 26.0, *), !GlassBackgroundView.useCustomGlassImpl {
             self.backgroundNode = nil
             
@@ -345,17 +387,36 @@ public class GlassBackgroundView: UIView {
             
             self.foregroundView = nil
             self.shadowView = nil
+            self.morphingShapeView = nil
         } else {
-            let backgroundNode = NavigationBackgroundNode(color: .black, enableBlur: true, customBlurRadius: 8.0)
-            self.backgroundNode = backgroundNode
-            self.nativeView = nil
-            self.nativeViewClippingContext = nil
-            self.nativeParamsView = nil
-            self.foregroundView = UIImageView()
-            
-            self.shadowView = UIImageView()
+            switch mode {
+            case .frostedGlass:
+                let backgroundNode = NavigationBackgroundNode(color: .black, enableBlur: true, customBlurRadius: 8.0)
+                self.backgroundNode = backgroundNode
+                self.nativeView = nil
+                self.nativeViewClippingContext = nil
+                self.nativeParamsView = nil
+                self.morphingShapeView = nil
+                self.foregroundView = UIImageView()
+
+                self.shadowView = UIImageView()
+            case .morphingGlass(let morphingGlass):
+                let morphingShapeView = MorphingShapeView(
+                    groupKey: morphingGlass.groupKey,
+                    interactionScale: morphingGlass.interactionScale,
+                    maxStretchScale: morphingGlass.maxStretchScale,
+                    maxTranslation: morphingGlass.maxTranslation
+                )
+                self.morphingShapeView = morphingShapeView
+                self.backgroundNode = nil
+                self.nativeView = nil
+                self.nativeViewClippingContext = nil
+                self.nativeParamsView = nil
+                self.foregroundView = nil
+                self.shadowView = nil
+            }
         }
-        
+
         self.maskContainerView = UIView()
         self.maskContainerView.backgroundColor = .white
         if let filter = CALayer.luminanceToAlpha() {
@@ -367,8 +428,8 @@ public class GlassBackgroundView: UIView {
         
         self.contentContainer = ContentContainer(maskContentView: self.maskContentView)
         
-        super.init(frame: frame)
-        
+        super.init(frame: .zero)
+
         if let shadowView = self.shadowView {
             self.addSubview(shadowView)
         }
@@ -382,7 +443,12 @@ public class GlassBackgroundView: UIView {
             self.addSubview(foregroundView)
             foregroundView.mask = self.maskContainerView
         }
-        self.addSubview(self.contentContainer)
+        if let morphingShapeView {
+            self.addSubview(morphingShapeView)
+//            morphingShapeView.bind(view: self)
+        } else {
+            self.addSubview(self.contentContainer)
+        }
     }
     
     required public init?(coder: NSCoder) {
@@ -394,6 +460,10 @@ public class GlassBackgroundView: UIView {
             if let result = nativeView.hitTest(self.convert(point, to: nativeView), with: event) {
                 return result
             }
+        } else if let morphingShapeView = self.morphingShapeView {
+            if let result = morphingShapeView.hitTest(self.convert(point, to: morphingShapeView), with: event) {
+                return result
+            }
         } else {
             if let result = self.contentContainer.hitTest(self.convert(point, to: self.contentContainer), with: event) {
                 return result
@@ -401,7 +471,7 @@ public class GlassBackgroundView: UIView {
         }
         return nil
     }
-        
+
     public func update(size: CGSize, cornerRadius: CGFloat, isDark: Bool, tintColor: TintColor, isInteractive: Bool = false, transition: ComponentTransition) {
         self.update(size: size, shape: .roundedRect(cornerRadius: cornerRadius), isDark: isDark, tintColor: tintColor, isInteractive: isInteractive, transition: transition)
     }
@@ -417,6 +487,15 @@ public class GlassBackgroundView: UIView {
                 transition.setFrame(view: nativeView, frame: nativeFrame)
             }
         }
+        if let morphingShapeView = self.morphingShapeView, (morphingShapeView.bounds.size != size) {
+            let frame = CGRect(origin: CGPoint(), size: size)
+            if transition.animation.isImmediate {
+                morphingShapeView.frame = frame
+            } else {
+                transition.setFrame(view: morphingShapeView, frame: frame)
+            }
+        }
+
         if let backgroundNode = self.backgroundNode {
             backgroundNode.updateColor(color: .clear, forceKeepBlur: tintColor.color.alpha != 1.0, transition: transition.containedViewLayoutTransition)
             
@@ -492,8 +571,14 @@ public class GlassBackgroundView: UIView {
                     context.fillEllipse(in: CGRect(origin: CGPoint(x: shadowInset + shadowInnerInset, y: shadowInset + shadowInnerInset), size: CGSize(width: size.width - shadowInset * 2.0 - shadowInnerInset * 2.0, height: size.height - shadowInset * 2.0 - shadowInnerInset * 2.0)))
                 })?.stretchableImage(withLeftCapWidth: Int(shadowInset + outerCornerRadius), topCapHeight: Int(shadowInset + outerCornerRadius))
             }
-            
-            if let foregroundView = self.foregroundView {
+
+            if let morphingShapeView {
+                switch params.shape {
+                case .roundedRect(let cornerRadius):
+                    morphingShapeView.corners = .rounded(cornerRadius)
+                }
+                morphingShapeView.shapeColor = params.tintColor.innerColor ?? params.tintColor.color
+            } else if let foregroundView = self.foregroundView {
                 foregroundView.image = GlassBackgroundView.generateLegacyGlassImage(size: CGSize(width: outerCornerRadius * 2.0, height: outerCornerRadius * 2.0), inset: shadowInset, isDark: isDark, fillColor: tintColor.color)
             } else {
                 if let nativeParamsView = self.nativeParamsView, let nativeView = self.nativeView {
@@ -544,6 +629,8 @@ public final class GlassBackgroundContainerView: UIView {
     }
     
     private let legacyView: ContentView?
+    private let morphingView: MorphingContainerView?
+    private let morphingOffset: CGSize
     private let nativeParamsView: EffectSettingsContainerView?
     private let nativeView: UIVisualEffectView?
     
@@ -551,11 +638,11 @@ public final class GlassBackgroundContainerView: UIView {
         if let nativeView = self.nativeView {
             return nativeView.contentView
         } else {
-            return self.legacyView!
+            return legacyView!
         }
     }
     
-    public override init(frame: CGRect) {
+    public init(mode: GlassBackgroundLegacyMode = .frostedGlass, morphingOffset: CGSize = .zero) {
         if #available(iOS 26.0, *) {
             let effect = UIGlassContainerEffect()
             effect.spacing = 7.0
@@ -567,17 +654,39 @@ public final class GlassBackgroundContainerView: UIView {
             nativeParamsView.addSubview(nativeView)
             
             self.legacyView = nil
+            self.morphingView = nil
         } else {
-            self.nativeView = nil
-            self.nativeParamsView = nil
-            self.legacyView = ContentView()
+            switch mode {
+            case .frostedGlass:
+                self.nativeView = nil
+                self.morphingView = nil
+                self.nativeParamsView = nil
+                self.legacyView = ContentView()
+            case .morphingGlass(let key):
+                let morphingView = MorphingContainerView(groupKey: key)
+                morphingView.spacing = 10
+                let legacyView = ContentView()
+
+                self.morphingView = morphingView
+                self.nativeView = nil
+                self.nativeParamsView = nil
+                self.legacyView = legacyView
+            }
+
         }
-        
-        super.init(frame: frame)
-        
+
+        self.morphingOffset = morphingOffset
+        super.init(frame: .zero)
+
         if let nativeParamsView = self.nativeParamsView {
             self.addSubview(nativeParamsView)
-        } else if let legacyView = self.legacyView {
+        }
+
+        if let morphingView = self.morphingView {
+            self.addSubview(morphingView)
+        }
+
+        if let legacyView = self.legacyView {
             self.addSubview(legacyView)
         }
     }
@@ -589,7 +698,7 @@ public final class GlassBackgroundContainerView: UIView {
     override public func didAddSubview(_ subview: UIView) {
         super.didAddSubview(subview)
         
-        if subview !== self.nativeParamsView && subview !== self.legacyView {
+        if subview !== self.nativeParamsView && subview !== self.legacyView && subview !== self.morphingView {
             assertionFailure()
         }
     }
@@ -614,8 +723,16 @@ public final class GlassBackgroundContainerView: UIView {
             }
             
             transition.setFrame(view: nativeView, frame: CGRect(origin: CGPoint(), size: size))
-        } else if let legacyView = self.legacyView {
+        }
+
+        if let legacyView = self.legacyView {
             transition.setFrame(view: legacyView, frame: CGRect(origin: CGPoint(), size: size))
+        }
+
+        if let morphingView = self.morphingView {
+            transition.setFrame(view: morphingView, frame: CGRect(origin: CGPoint(), size: size).insetBy(dx: -morphingOffset.width, dy: -morphingOffset.height))
+            morphingView.blurStyle = isDark ? .systemThinMaterialDark : .systemThinMaterialLight
+            morphingView.highlightOpacity = isDark ? 0.3 : 0.6
         }
     }
 }

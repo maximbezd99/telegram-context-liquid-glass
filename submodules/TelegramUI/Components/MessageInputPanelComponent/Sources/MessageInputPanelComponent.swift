@@ -1500,7 +1500,8 @@ public final class MessageInputPanelComponent: Component {
             switch component.style {
             case .gift:
                 if self.fieldGlassBackgroundView == nil {
-                    let fieldGlassBackgroundView = GlassBackgroundView(frame: fieldBackgroundFrame)
+                    let fieldGlassBackgroundView = GlassBackgroundView()
+                    fieldGlassBackgroundView.frame = fieldBackgroundFrame
                     self.insertSubview(fieldGlassBackgroundView, aboveSubview: self.fieldBackgroundView)
                     self.fieldGlassBackgroundView = fieldGlassBackgroundView
                     
@@ -1513,7 +1514,8 @@ public final class MessageInputPanelComponent: Component {
                 }
             case .videoChat:
                 if self.fieldGlassBackgroundView == nil {
-                    let fieldGlassBackgroundView = GlassBackgroundView(frame: fieldBackgroundFrame)
+                    let fieldGlassBackgroundView = GlassBackgroundView()
+                    fieldGlassBackgroundView.frame = fieldBackgroundFrame
                     self.insertSubview(fieldGlassBackgroundView, aboveSubview: self.fieldBackgroundView)
                     self.fieldGlassBackgroundView = fieldGlassBackgroundView
                     

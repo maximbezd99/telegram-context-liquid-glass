@@ -824,7 +824,7 @@ class ChatControllerNode: ASDisplayNode, ASScrollViewDelegate {
         self.contentContainerNode.contentNode.addSubnode(self.backgroundNode)
         self.contentContainerNode.contentNode.addSubnode(self.historyNodeContainer)
         self.contentContainerNode.contentNode.addSubnode(self.floatingTopicsPanelContainer)
-        
+
         if let navigationBar = self.navigationBar {
             self.contentContainerNode.contentNode.addSubnode(navigationBar)
         }

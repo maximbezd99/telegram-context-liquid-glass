@@ -312,3 +312,13 @@ final class TabBarControllerNode: ASDisplayNode {
         self.requestUpdate()
     }
 }
+
+final class TabBarNodeItem {
+    let item: UITabBarItem
+    let contextActionType: TabBarItemContextActionType
+    
+    init(item: UITabBarItem, contextActionType: TabBarItemContextActionType) {
+        self.item = item
+        self.contextActionType = contextActionType
+    }
+}

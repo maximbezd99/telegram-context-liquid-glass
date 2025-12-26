@@ -627,10 +627,19 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
         }
         self.inputMenu = TextInputMenu(hasSpoilers: hasSpoilers, hasQuotes: hasQuotes)
         
-        self.glassBackgroundContainer = GlassBackgroundContainerView()
-        
-        self.textInputContainerBackgroundView = GlassBackgroundView(frame: CGRect())
-        
+        self.glassBackgroundContainer = GlassBackgroundContainerView(mode: .morphingGlass("chatFooter"), morphingOffset: CGSize(width: 0, height: 100))
+
+        self.textInputContainerBackgroundView = GlassBackgroundView(
+            mode: .morphingGlass(
+                .init(
+                    groupKey: "chatFooter",
+                    interactionScale: 0.03,
+                    maxStretchScale: .init(width: 0.1, height: 0.1),
+                    maxTranslation: .init(width: 5, height: 5)
+                )
+            )
+        )
+
         self.accessoryPanelContainer = UIView()
         self.accessoryPanelContainer.clipsToBounds = true
         
@@ -661,7 +670,7 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
         self.menuButton.clipsToBounds = true
         self.menuButton.cornerRadius = 16.0
         self.menuButton.accessibilityLabel = presentationInterfaceState.strings.Conversation_InputMenu
-        self.menuButtonBackgroundView = GlassBackgroundView()
+        self.menuButtonBackgroundView = GlassBackgroundView(mode: .morphingGlass(.smallUtilityButton(group: "chatFooter")))
         self.menuButtonBackgroundView.isUserInteractionEnabled = false
         self.menuButtonClippingNode = ASDisplayNode()
         self.menuButtonClippingNode.clipsToBounds = true
@@ -688,7 +697,7 @@ public class ChatTextInputPanelNode: ChatInputPanelNode, ASEditableTextNodeDeleg
         self.attachmentButton.accessibilityTraits = [.button]
         self.attachmentButton.isAccessibilityElement = true
         
-        self.attachmentButtonBackground = GlassBackgroundView(frame: CGRect())
+        self.attachmentButtonBackground = GlassBackgroundView(mode: .morphingGlass(.smallUtilityButton(group: "chatFooter")))
         self.attachmentButtonBackground.contentView.addSubview(self.attachmentButton)
         
         self.attachmentButtonIcon = GlassBackgroundView.ContentImageView()

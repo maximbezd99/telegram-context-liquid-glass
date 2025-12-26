@@ -180,7 +180,7 @@ public final class ChatTextInputActionButtonsNode: ASDisplayNode, ChatSendMessag
         let strings = presentationInterfaceState.strings
         self.strings = strings
         
-        self.micButtonBackgroundView = GlassBackgroundView()
+        self.micButtonBackgroundView = GlassBackgroundView(mode: .morphingGlass(.smallUtilityButton(group: "chatFooter")))
         self.maskContentView = UIView()
         
         self.micButtonTintMaskView = UIImageView()
@@ -200,7 +200,7 @@ public final class ChatTextInputActionButtonsNode: ASDisplayNode, ChatSendMessag
         self.textNode.isUserInteractionEnabled = false
         
         self.expandMediaInputButton = HighlightTrackingButton()
-        self.expandMediaInputButtonBackgroundView = GlassBackgroundView()
+        self.expandMediaInputButtonBackgroundView = GlassBackgroundView(mode: .morphingGlass(.smallUtilityButton(group: "chatFooter")))
         self.expandMediaInputButtonBackgroundView.isUserInteractionEnabled = false
         self.expandMediaInputButton.addSubview(self.expandMediaInputButtonBackgroundView)
         self.expandMediaInputButtonIcon = GlassBackgroundView.ContentImageView()
